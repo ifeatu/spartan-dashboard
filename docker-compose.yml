@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  spartan-dashboard:
+    build: .
+    image: spartan-dashboard:latest
+    container_name: spartan-dashboard
+    ports:
+      - "8780:80"
+    volumes:
+      - ./htpasswd:/etc/nginx/.htpasswd:ro
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
