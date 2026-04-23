@@ -269,6 +269,7 @@ export default function App() {
     const start = Date.now()
     try {
       const res = await fetch(`/api/health/${agent.id}`, {
+        cache: 'no-store',
         signal: AbortSignal.timeout(4000),
       })
       const latencyMs = Date.now() - start
