@@ -253,6 +253,161 @@ function AgentCard({ agent, result, selected, onClick }) {
   )
 }
 
+/* ── Build Queue Panel ───────────────────────────────── */
+const QUEUE_REFRESH_MS = 15_000
+
+function QueueStat({ label, value, tone }) {
+  return (
+    <div className={`queue-stat queue-stat-${tone || 'neutral'}`}>
+      <div className="queue-stat-value">{value}</div>
+      <div className="queue-stat-label">{label}</div>
+    </div>
+  )
+}
+
+function QueueItemRow({ item }) {
+  const status = item.status || 'queued'
+  return (
+    <div className={`queue-item queue-item-${status}`}>
+      <div className="queue-item-id">#{item.id}</div>
+      <div className="queue-item-main">
+        <div className="queue-item-title">{item.title}</div>
+        <div className="queue-item-meta">
+          <span className="queue-item-repo">{item.repo}</span>
+          <span className="queue-item-sep">·</span>
+          <span>{item.task_class}</span>
+          <span className="queue-item-sep">·</span>
+          <span>p{item.priority}</span>
+          {item.target_backend && (
+            <>
+              <span className="queue-item-sep">·</span>
+              <span>{item.target_backend}</span>
+            </>
+          )}
+          {item.gate_required ? (
+            <>
+              <span className="queue-item-sep">·</span>
+              <span className="queue-item-gated">gated</span>
+            </>
+          ) : (
+            <>
+              <span className="queue-item-sep">·</span>
+              <span className="queue-item-auto">auto-merge</span>
+            </>
+          )}
+        </div>
+      </div>
+      <div className={`queue-item-status badge-${status}`}>{status}</div>
+    </div>
+  )
+}
+
+function QueuePanel() {
+  const [summary, setSummary] = useState(null)
+  const [items, setItems] = useState(null) // null = unknown, [] = empty, [...]
+  const [listSupported, setListSupported] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const [polling, setPolling] = useState(false)
+
+  const fetchQueue = useCallback(async () => {
+    setPolling(true)
+    try {
+      const sumRes = await fetch('/api/bob/queue/summary', {
+        signal: AbortSignal.timeout(4000),
+      })
+      if (sumRes.ok) {
+        const sumJson = await sumRes.json()
+        setSummary(sumJson)
+      }
+    } catch (e) {
+      // leave previous summary intact
+    }
+    // /queue/list may not exist yet (delivered by queue item #144).
+    // Probe gracefully — once it's wired up the panel lights up without redeploy.
+    if (listSupported) {
+      try {
+        const listRes = await fetch(
+          '/api/bob/queue/list?status=queued,dispatched,running,gated&limit=10',
+          { signal: AbortSignal.timeout(4000) }
+        )
+        if (listRes.status === 404) {
+          setListSupported(false)
+        } else if (listRes.ok) {
+          const listJson = await listRes.json()
+          setItems(listJson.items || [])
+        }
+      } catch (e) {
+        // network blip — keep prior items
+      }
+    }
+    setUpdatedAt(new Date())
+    setPolling(false)
+  }, [listSupported])
+
+  useEffect(() => {
+    fetchQueue()
+    const id = setInterval(fetchQueue, QUEUE_REFRESH_MS)
+    return () => clearInterval(id)
+  }, [fetchQueue])
+
+  if (!summary) {
+    return (
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Build Queue</span>
+          <span className="queue-panel-status">Loading…</span>
+        </div>
+      </section>
+    )
+  }
+
+  const c = summary.counts || {}
+  const last24 = summary.last_24h || {}
+  const breaker = summary.breaker || 'unknown'
+  const active = (c.queued || 0) + (c.dispatched || 0) + (c.running || 0) + (c.gated || 0)
+
+  return (
+    <section className="queue-panel">
+      <div className="queue-panel-header">
+        <span className="queue-panel-title">Build Queue</span>
+        <span className={`queue-breaker breaker-${breaker}`}>
+          breaker: {breaker}
+        </span>
+        <span className="queue-panel-status">
+          {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
+        </span>
+      </div>
+      <div className="queue-stats-row">
+        <QueueStat label="queued" value={c.queued || 0} tone="info" />
+        <QueueStat label="dispatched" value={c.dispatched || 0} tone="info" />
+        <QueueStat label="running" value={c.running || 0} tone="info" />
+        <QueueStat label="gated" value={c.gated || 0} tone="warn" />
+        <QueueStat label="done 24h" value={last24.done || 0} tone="good" />
+        <QueueStat label="failed 24h" value={last24.failed || 0} tone={last24.failed ? 'bad' : 'neutral'} />
+        <QueueStat label="total done" value={c.done || 0} tone="neutral" />
+        <QueueStat label="active" value={active} tone={active ? 'info' : 'neutral'} />
+      </div>
+      {listSupported ? (
+        items === null ? (
+          <div className="queue-list-empty">Fetching items…</div>
+        ) : items.length === 0 ? (
+          <div className="queue-list-empty">
+            No active items. {active === 0 && 'Queue is drained — auto-seed cron runs every 30 min.'}
+          </div>
+        ) : (
+          <div className="queue-list">
+            {items.map(item => <QueueItemRow key={item.id} item={item} />)}
+          </div>
+        )
+      ) : (
+        <div className="queue-list-empty queue-list-hint">
+          Item list endpoint not deployed yet. Queue #144 (pending) adds <code>/queue/list</code> + <code>/debt/list</code> — this panel auto-upgrades once it lands.
+        </div>
+      )}
+    </section>
+  )
+}
+
 /* ── Main App ────────────────────────────────────────── */
 const REFRESH_INTERVAL = 30_000
 
@@ -391,6 +546,9 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Build Queue */}
+      <QueuePanel />
 
       {/* Main grid */}
       <main className="main-content">
