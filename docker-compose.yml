@@ -2,7 +2,10 @@ version: "3.8"
 
 services:
   spartan-dashboard:
-    build: .
+    build:
+      context: .
+      args:
+        - VITE_BOB_SECRET=${BOB_SECRET:-}
     image: spartan-dashboard:latest
     container_name: spartan-dashboard
     ports:

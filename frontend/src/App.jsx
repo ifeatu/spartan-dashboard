@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import './App.css'
 
+const BOB_SECRET = import.meta.env.VITE_BOB_SECRET || ''
+
 /* ── Fleet registry ──────────────────────────────────── */
 const GROUPS = [
   {
@@ -256,6 +258,60 @@ function AgentCard({ agent, result, selected, onClick }) {
 /* ── Build Queue Panel ───────────────────────────────── */
 const QUEUE_REFRESH_MS = 15_000
 
+async function postDecision(itemId, decision) {
+  const res = await fetch(`/api/bob/queue/${itemId}/decision`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bob-Secret': BOB_SECRET,
+    },
+    body: JSON.stringify({ decision }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+  }
+  return res.json().catch(() => null)
+}
+
+/* ── Toast ───────────────────────────────────────────── */
+function Toast({ toasts, onDismiss }) {
+  if (!toasts.length) return null
+  return (
+    <div className="toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast toast-${t.type}`} onClick={() => onDismiss(t.id)}>
+          {t.message}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ── Confirm Modal ───────────────────────────────────── */
+function ConfirmModal({ title, message, onConfirm, onCancel }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onCancel])
+
+  return (
+    <>
+      <div className="detail-overlay" onClick={onCancel} />
+      <div className="confirm-modal">
+        <div className="confirm-title">{title}</div>
+        <div className="confirm-message">{message}</div>
+        <div className="confirm-actions">
+          <button className="btn-confirm-cancel" onClick={onCancel}>Cancel</button>
+          <button className="btn-confirm-ok" onClick={onConfirm}>Discard</button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function QueueStat({ label, value, tone }) {
   return (
     <div className={`queue-stat queue-stat-${tone || 'neutral'}`}>
@@ -265,8 +321,11 @@ function QueueStat({ label, value, tone }) {
   )
 }
 
-function QueueItemRow({ item }) {
+function QueueItemRow({ item, onDecision, loadingId }) {
   const status = item.status || 'queued'
+  const isGated = status === 'gated'
+  const isLoading = loadingId === item.id
+
   return (
     <div className={`queue-item queue-item-${status}`}>
       <div className="queue-item-id">#{item.id}</div>
@@ -297,7 +356,31 @@ function QueueItemRow({ item }) {
           )}
         </div>
       </div>
-      <div className={`queue-item-status badge-${status}`}>{status}</div>
+      <div className="queue-item-right">
+        {isGated && (
+          isLoading ? (
+            <div className="queue-decision-loading">
+              <span className="spinner-sm" /> processing…
+            </div>
+          ) : (
+            <div className="queue-decision-btns">
+              <button
+                className="btn-decision btn-merge"
+                onClick={() => onDecision(item, 'merge')}
+              >Merge</button>
+              <button
+                className="btn-decision btn-discard"
+                onClick={() => onDecision(item, 'discard')}
+              >Discard</button>
+              <button
+                className="btn-decision btn-defer"
+                onClick={() => onDecision(item, 'defer')}
+              >Defer</button>
+            </div>
+          )
+        )}
+        <div className={`queue-item-status badge-${status}`}>{status}</div>
+      </div>
     </div>
   )
 }
@@ -308,6 +391,20 @@ function QueuePanel() {
   const [listSupported, setListSupported] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(null)
   const [polling, setPolling] = useState(false)
+  const [loadingId, setLoadingId] = useState(null)
+  const [confirmPending, setConfirmPending] = useState(null) // {item, decision}
+  const [toasts, setToasts] = useState([])
+  const toastIdRef = useRef(0)
+
+  const addToast = useCallback((message, type = 'info') => {
+    const id = ++toastIdRef.current
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  }, [])
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
 
   const fetchQueue = useCallback(async () => {
     setPolling(true)
@@ -350,6 +447,27 @@ function QueuePanel() {
     return () => clearInterval(id)
   }, [fetchQueue])
 
+  const executeDecision = useCallback(async (item, decision) => {
+    setLoadingId(item.id)
+    try {
+      await postDecision(item.id, decision)
+      addToast(`#${item.id} → ${decision} accepted`, 'success')
+      fetchQueue()
+    } catch (err) {
+      addToast(`#${item.id} ${decision} failed: ${err.message}`, 'error')
+    } finally {
+      setLoadingId(null)
+    }
+  }, [addToast, fetchQueue])
+
+  const handleDecision = useCallback((item, decision) => {
+    if (decision === 'discard') {
+      setConfirmPending({ item, decision })
+      return
+    }
+    executeDecision(item, decision)
+  }, [executeDecision])
+
   if (!summary) {
     return (
       <section className="queue-panel">
@@ -367,44 +485,68 @@ function QueuePanel() {
   const active = (c.queued || 0) + (c.dispatched || 0) + (c.running || 0) + (c.gated || 0)
 
   return (
-    <section className="queue-panel">
-      <div className="queue-panel-header">
-        <span className="queue-panel-title">Build Queue</span>
-        <span className={`queue-breaker breaker-${breaker}`}>
-          breaker: {breaker}
-        </span>
-        <span className="queue-panel-status">
-          {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
-        </span>
-      </div>
-      <div className="queue-stats-row">
-        <QueueStat label="queued" value={c.queued || 0} tone="info" />
-        <QueueStat label="dispatched" value={c.dispatched || 0} tone="info" />
-        <QueueStat label="running" value={c.running || 0} tone="info" />
-        <QueueStat label="gated" value={c.gated || 0} tone="warn" />
-        <QueueStat label="done 24h" value={last24.done || 0} tone="good" />
-        <QueueStat label="failed 24h" value={last24.failed || 0} tone={last24.failed ? 'bad' : 'neutral'} />
-        <QueueStat label="total done" value={c.done || 0} tone="neutral" />
-        <QueueStat label="active" value={active} tone={active ? 'info' : 'neutral'} />
-      </div>
-      {listSupported ? (
-        items === null ? (
-          <div className="queue-list-empty">Fetching items…</div>
-        ) : items.length === 0 ? (
-          <div className="queue-list-empty">
-            No active items. {active === 0 && 'Queue is drained — auto-seed cron runs every 30 min.'}
-          </div>
-        ) : (
-          <div className="queue-list">
-            {items.map(item => <QueueItemRow key={item.id} item={item} />)}
-          </div>
-        )
-      ) : (
-        <div className="queue-list-empty queue-list-hint">
-          Item list endpoint not deployed yet. Queue #144 (pending) adds <code>/queue/list</code> + <code>/debt/list</code> — this panel auto-upgrades once it lands.
+    <>
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Build Queue</span>
+          <span className={`queue-breaker breaker-${breaker}`}>
+            breaker: {breaker}
+          </span>
+          <span className="queue-panel-status">
+            {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
+          </span>
         </div>
+        <div className="queue-stats-row">
+          <QueueStat label="queued" value={c.queued || 0} tone="info" />
+          <QueueStat label="dispatched" value={c.dispatched || 0} tone="info" />
+          <QueueStat label="running" value={c.running || 0} tone="info" />
+          <QueueStat label="gated" value={c.gated || 0} tone="warn" />
+          <QueueStat label="done 24h" value={last24.done || 0} tone="good" />
+          <QueueStat label="failed 24h" value={last24.failed || 0} tone={last24.failed ? 'bad' : 'neutral'} />
+          <QueueStat label="total done" value={c.done || 0} tone="neutral" />
+          <QueueStat label="active" value={active} tone={active ? 'info' : 'neutral'} />
+        </div>
+        {listSupported ? (
+          items === null ? (
+            <div className="queue-list-empty">Fetching items…</div>
+          ) : items.length === 0 ? (
+            <div className="queue-list-empty">
+              No active items. {active === 0 && 'Queue is drained — auto-seed cron runs every 30 min.'}
+            </div>
+          ) : (
+            <div className="queue-list">
+              {items.map(item => (
+                <QueueItemRow
+                  key={item.id}
+                  item={item}
+                  onDecision={handleDecision}
+                  loadingId={loadingId}
+                />
+              ))}
+            </div>
+          )
+        ) : (
+          <div className="queue-list-empty queue-list-hint">
+            Item list endpoint not deployed yet. Queue #144 (pending) adds <code>/queue/list</code> + <code>/debt/list</code> — this panel auto-upgrades once it lands.
+          </div>
+        )}
+      </section>
+
+      {confirmPending && (
+        <ConfirmModal
+          title="Discard build?"
+          message={`Discard #${confirmPending.item.id} "${confirmPending.item.title}"? This cannot be undone.`}
+          onConfirm={() => {
+            const { item, decision } = confirmPending
+            setConfirmPending(null)
+            executeDecision(item, decision)
+          }}
+          onCancel={() => setConfirmPending(null)}
+        />
       )}
-    </section>
+
+      <Toast toasts={toasts} onDismiss={dismissToast} />
+    </>
   )
 }
 

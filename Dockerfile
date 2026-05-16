@@ -6,6 +6,8 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
+ARG VITE_BOB_SECRET=""
+ENV VITE_BOB_SECRET=$VITE_BOB_SECRET
 RUN npm run build
 
 # ── Stage 2: Serve with nginx ─────────────────────────
