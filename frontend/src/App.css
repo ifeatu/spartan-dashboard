@@ -339,6 +339,16 @@
 .badge-running    { color: var(--accent);   background: rgba(0,255,136,0.16); border: 1px solid rgba(0,255,136,0.45); }
 .badge-gated      { color: var(--degraded); background: rgba(255,170,0,0.10); border: 1px solid rgba(255,170,0,0.25); }
 
+/* Tech debt severity badges + markers */
+.badge-sev-critical { color: var(--down);     background: rgba(255,68,68,0.14); border: 1px solid rgba(255,68,68,0.40); }
+.badge-sev-high     { color: var(--degraded); background: rgba(255,170,0,0.12); border: 1px solid rgba(255,170,0,0.30); }
+.badge-sev-medium   { color: var(--accent);   background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.22); }
+.badge-sev-low      { color: var(--text-dim); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); }
+.queue-item-sev-critical::before { background: var(--down); }
+.queue-item-sev-high::before     { background: var(--degraded); }
+.queue-item-sev-medium::before   { background: var(--accent); }
+.queue-item-sev-low::before      { background: var(--text-muted); }
+
 .queue-list-empty {
   font-size: 11px;
   color: var(--text-muted);

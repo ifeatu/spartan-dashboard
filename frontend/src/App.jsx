@@ -550,6 +550,114 @@ function QueuePanel() {
   )
 }
 
+function DebtItemRow({ item }) {
+  const sev = item.severity || 'low'
+  return (
+    <div className={`queue-item queue-item-sev-${sev}`}>
+      <div className="queue-item-id">#{item.id}</div>
+      <div className="queue-item-main">
+        <div className="queue-item-title">{item.title}</div>
+        <div className="queue-item-meta">
+          <span className="queue-item-repo">{item.repo_id}</span>
+          <span className="queue-item-sep">·</span>
+          <span>{item.category}</span>
+        </div>
+      </div>
+      <div className={`queue-item-status badge-sev-${sev}`}>{sev}</div>
+    </div>
+  )
+}
+
+function DebtPanel() {
+  const [items, setItems] = useState(null)
+  const [supported, setSupported] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const [polling, setPolling] = useState(false)
+
+  const fetchDebt = useCallback(async () => {
+    setPolling(true)
+    try {
+      const res = await fetch('/api/bob/debt/list?status=open', {
+        signal: AbortSignal.timeout(4000),
+      })
+      if (res.status === 404) {
+        setSupported(false)
+      } else if (res.ok) {
+        const json = await res.json()
+        setItems(json.items || [])
+        setUpdatedAt(new Date())
+      }
+    } catch (e) {
+      // network blip — keep prior items
+    }
+    setPolling(false)
+  }, [])
+
+  useEffect(() => {
+    fetchDebt()
+    const id = setInterval(fetchDebt, QUEUE_REFRESH_MS)
+    return () => clearInterval(id)
+  }, [fetchDebt])
+
+  if (!supported) {
+    return (
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Tech Debt</span>
+          <span className="queue-panel-status">/debt/list not deployed yet</span>
+        </div>
+      </section>
+    )
+  }
+  if (items === null) {
+    return (
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Tech Debt</span>
+          <span className="queue-panel-status">Loading…</span>
+        </div>
+      </section>
+    )
+  }
+
+  const order = { critical: 1, high: 2, medium: 3, low: 4 }
+  const sev = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const it of items) if (sev[it.severity] !== undefined) sev[it.severity]++
+  const top = [...items]
+    .sort((a, b) => (order[a.severity] || 9) - (order[b.severity] || 9))
+    .slice(0, 12)
+
+  return (
+    <section className="queue-panel">
+      <div className="queue-panel-header">
+        <span className="queue-panel-title">Tech Debt</span>
+        <span className="queue-panel-status">
+          {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
+        </span>
+      </div>
+      <div className="queue-stats-row">
+        <QueueStat label="open" value={items.length} tone="info" />
+        <QueueStat label="critical" value={sev.critical} tone={sev.critical ? 'bad' : 'neutral'} />
+        <QueueStat label="high" value={sev.high} tone={sev.high ? 'warn' : 'neutral'} />
+        <QueueStat label="medium" value={sev.medium} tone="neutral" />
+        <QueueStat label="low" value={sev.low} tone="neutral" />
+      </div>
+      {items.length === 0 ? (
+        <div className="queue-list-empty">No open tech debt. 🎉</div>
+      ) : (
+        <div className="queue-list">
+          {top.map(it => <DebtItemRow key={it.id} item={it} />)}
+          {items.length > top.length && (
+            <div className="queue-list-empty queue-list-hint">
+              +{items.length - top.length} more open items (critical/high shown first)
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 /* ── Main App ────────────────────────────────────────── */
 const REFRESH_INTERVAL = 30_000
 
@@ -691,6 +799,9 @@ export default function App() {
 
       {/* Build Queue */}
       <QueuePanel />
+
+      {/* Tech Debt */}
+      <DebtPanel />
 
       {/* Main grid */}
       <main className="main-content">
