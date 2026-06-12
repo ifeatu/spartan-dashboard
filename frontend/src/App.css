@@ -929,3 +929,20 @@
 .breaker-fail-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .breaker-fail-err { color: var(--down); font-family: ui-monospace, monospace; font-size: 0.68rem; white-space: nowrap; }
 .btn-breaker-ok { background: var(--down) !important; border-color: var(--down) !important; }
+
+/* ── Queue-debt on-demand button ───────────────────────── */
+.btn-queue-debt {
+  margin-left: 8px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent, #5cc8ff);
+  background: rgba(92,200,255,0.10);
+  border: 1px solid rgba(92,200,255,0.40);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-queue-debt:hover:not(:disabled) { background: rgba(92,200,255,0.20); }
+.btn-queue-debt:disabled { opacity: 0.5; cursor: default; }

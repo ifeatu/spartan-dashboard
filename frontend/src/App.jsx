@@ -291,6 +291,23 @@ async function postBreakerClear() {
   return res.json().catch(() => null)
 }
 
+async function postSeedDebt() {
+  const res = await fetch('/api/bob/queue/seed-debt', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bob-Secret': BOB_SECRET,
+    },
+    body: JSON.stringify({}),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+  }
+  return res.json().catch(() => null)
+}
+
 async function fetchRecentFailures() {
   try {
     const res = await fetch('/api/bob/queue/list?status=failed&limit=6', {
@@ -431,6 +448,7 @@ function QueuePanel() {
   const [confirmPending, setConfirmPending] = useState(null) // {item, decision}
   const [triage, setTriage] = useState(null) // null | {loading, fails}
   const [breakerBusy, setBreakerBusy] = useState(false)
+  const [seedBusy, setSeedBusy] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
 
@@ -530,6 +548,23 @@ function QueuePanel() {
     }
   }, [addToast, fetchQueue])
 
+  const doSeedDebt = useCallback(async () => {
+    setSeedBusy(true)
+    try {
+      const res = await postSeedDebt()
+      const n = res?.count ?? 0
+      addToast(
+        n > 0 ? `Queued ${n} debt item${n === 1 ? '' : 's'}` : 'No new eligible debt to queue',
+        n > 0 ? 'success' : 'info',
+      )
+      fetchQueue()
+    } catch (err) {
+      addToast(`Queue debt failed: ${err.message}`, 'error')
+    } finally {
+      setSeedBusy(false)
+    }
+  }, [addToast, fetchQueue])
+
   if (!summary) {
     return (
       <section className="queue-panel">
@@ -564,6 +599,14 @@ function QueuePanel() {
               ⚡ triage &amp; clear
             </button>
           )}
+          <button
+            className="btn-queue-debt"
+            onClick={doSeedDebt}
+            disabled={seedBusy}
+            title="Queue eligible open high-severity tech debt on demand"
+          >
+            {seedBusy ? 'queuing…' : '+ queue debt'}
+          </button>
           <span className="queue-panel-status">
             {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
           </span>
