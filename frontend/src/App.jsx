@@ -275,6 +275,42 @@ async function postDecision(itemId, decision) {
   return res.json().catch(() => null)
 }
 
+async function postBreakerClear() {
+  const res = await fetch('/api/bob/queue/breaker/clear', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bob-Secret': BOB_SECRET,
+    },
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+  }
+  return res.json().catch(() => null)
+}
+
+async function fetchRecentFailures() {
+  try {
+    const res = await fetch('/api/bob/queue/list?status=failed&limit=6', {
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return []
+    const json = await res.json()
+    return json.items || []
+  } catch {
+    return []
+  }
+}
+
+function breakerErr(log) {
+  if (!log) return ''
+  const s = String(log)
+  const m = s.match(/ccp_noop|needs_decompose|placeholder_detected|DRIFT|gate_bypass|push_verification_failed|SSH command timed out|DUPLICATE BLOCKED/i)
+  return m ? m[0] : s.slice(0, 48)
+}
+
 /* ── Toast ───────────────────────────────────────────── */
 function Toast({ toasts, onDismiss }) {
   if (!toasts.length) return null
@@ -393,6 +429,8 @@ function QueuePanel() {
   const [polling, setPolling] = useState(false)
   const [loadingId, setLoadingId] = useState(null)
   const [confirmPending, setConfirmPending] = useState(null) // {item, decision}
+  const [triage, setTriage] = useState(null) // null | {loading, fails}
+  const [breakerBusy, setBreakerBusy] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
 
@@ -468,6 +506,30 @@ function QueuePanel() {
     executeDecision(item, decision)
   }, [executeDecision])
 
+  const openTriage = useCallback(async () => {
+    setTriage({ loading: true, fails: [] })
+    const fails = await fetchRecentFailures()
+    setTriage({ loading: false, fails })
+  }, [])
+
+  const doClearBreaker = useCallback(async () => {
+    setBreakerBusy(true)
+    try {
+      const res = await postBreakerClear()
+      const d = res?.drain?.drain
+      const tail = d?.status === 'dispatched'
+        ? ` — dispatched #${d.id}`
+        : (d?.status === 'idle' ? ' — no eligible item to dispatch' : '')
+      addToast(`Breaker cleared${tail}`, 'success')
+      setTriage(null)
+      fetchQueue()
+    } catch (err) {
+      addToast(`Clear failed: ${err.message}`, 'error')
+    } finally {
+      setBreakerBusy(false)
+    }
+  }, [addToast, fetchQueue])
+
   if (!summary) {
     return (
       <section className="queue-panel">
@@ -492,6 +554,16 @@ function QueuePanel() {
           <span className={`queue-breaker breaker-${breaker}`}>
             breaker: {breaker}
           </span>
+          {breaker === 'open' && (
+            <button
+              className="btn-clear-breaker"
+              onClick={openTriage}
+              disabled={breakerBusy}
+              title="Triage recent failures and clear the circuit breaker"
+            >
+              ⚡ triage &amp; clear
+            </button>
+          )}
           <span className="queue-panel-status">
             {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
           </span>
@@ -543,6 +615,39 @@ function QueuePanel() {
           }}
           onCancel={() => setConfirmPending(null)}
         />
+      )}
+
+      {triage && (
+        <>
+          <div className="detail-overlay" onClick={() => !breakerBusy && setTriage(null)} />
+          <div className="confirm-modal breaker-modal">
+            <div className="confirm-title">Clear circuit breaker?</div>
+            <div className="confirm-message">
+              The breaker halts all dispatch after repeated failures. Review what tripped it, then clear to resume — this also kicks one drain cycle.
+            </div>
+            <div className="breaker-fails">
+              {triage.loading ? (
+                <div className="breaker-fails-empty">Loading recent failures…</div>
+              ) : triage.fails.length === 0 ? (
+                <div className="breaker-fails-empty">No recent failures recorded.</div>
+              ) : (
+                triage.fails.map(f => (
+                  <div key={f.id} className="breaker-fail-row">
+                    <span className="breaker-fail-id">#{f.id}</span>
+                    <span className="breaker-fail-title">{f.title}</span>
+                    <span className="breaker-fail-err">{breakerErr(f.error_log)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="confirm-actions">
+              <button className="btn-confirm-cancel" onClick={() => setTriage(null)} disabled={breakerBusy}>Cancel</button>
+              <button className="btn-confirm-ok btn-breaker-ok" onClick={doClearBreaker} disabled={breakerBusy}>
+                {breakerBusy ? 'Clearing…' : 'Clear breaker & drain'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
