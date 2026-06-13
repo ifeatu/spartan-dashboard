@@ -259,6 +259,8 @@ function AgentCard({ agent, result, selected, onClick }) {
 const QUEUE_REFRESH_MS = 15_000
 
 async function postDecision(itemId, decision) {
+  // Squash-merge + Bob's post-merge verification can legitimately take 20-40s.
+  // Use 60s so we don't abort a merge that is still running server-side.
   const res = await fetch(`/api/bob/queue/${itemId}/decision`, {
     method: 'POST',
     headers: {
@@ -266,7 +268,7 @@ async function postDecision(itemId, decision) {
       'X-Bob-Secret': BOB_SECRET,
     },
     body: JSON.stringify({ decision }),
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(60_000),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -374,10 +376,13 @@ function QueueStat({ label, value, tone }) {
   )
 }
 
-function QueueItemRow({ item, onDecision, loadingId }) {
+function QueueItemRow({ item, onDecision, loadingId, pendingIds }) {
   const status = item.status || 'queued'
   const isGated = status === 'gated'
   const isLoading = loadingId === item.id
+  // Pending = decision was sent but we haven't yet confirmed via polling
+  // (e.g. the request is still in-flight or timed out client-side while server processes)
+  const isPending = pendingIds.has(item.id)
 
   return (
     <div className={`queue-item queue-item-${status}`}>
@@ -411,9 +416,9 @@ function QueueItemRow({ item, onDecision, loadingId }) {
       </div>
       <div className="queue-item-right">
         {isGated && (
-          isLoading ? (
+          (isLoading || isPending) ? (
             <div className="queue-decision-loading">
-              <span className="spinner-sm" /> processing…
+              <span className="spinner-sm" /> {isLoading ? 'processing…' : 'merging…'}
             </div>
           ) : (
             <div className="queue-decision-btns">
@@ -445,6 +450,9 @@ function QueuePanel() {
   const [updatedAt, setUpdatedAt] = useState(null)
   const [polling, setPolling] = useState(false)
   const [loadingId, setLoadingId] = useState(null)
+  // Items whose decision was fired but not yet confirmed (fire-then-reconcile pattern).
+  // Prevents double-clicks and avoids clearing the spinner when a merge response is slow.
+  const [pendingIds, setPendingIds] = useState(new Set())
   const [confirmPending, setConfirmPending] = useState(null) // {item, decision}
   const [triage, setTriage] = useState(null) // null | {loading, fails}
   const [breakerBusy, setBreakerBusy] = useState(false)
@@ -503,14 +511,47 @@ function QueuePanel() {
     return () => clearInterval(id)
   }, [fetchQueue])
 
+  // Reconcile pending decisions: once an item is no longer in the gated list,
+  // the merge (or discard/defer) has resolved on the server — clear its pending flag.
+  useEffect(() => {
+    if (!items) return
+    setPendingIds(prev => {
+      if (prev.size === 0) return prev
+      const gatedIds = new Set(items.filter(i => i.status === 'gated').map(i => i.id))
+      const toResolve = [...prev].filter(id => !gatedIds.has(id))
+      if (toResolve.length === 0) return prev
+      const next = new Set(prev)
+      toResolve.forEach(id => next.delete(id))
+      return next
+    })
+  }, [items]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const executeDecision = useCallback(async (item, decision) => {
     setLoadingId(item.id)
+    // Mark as pending immediately so the row locks while the server processes.
+    setPendingIds(prev => { const s = new Set(prev); s.add(item.id); return s })
     try {
       await postDecision(item.id, decision)
       addToast(`#${item.id} → ${decision} accepted`, 'success')
+      setPendingIds(prev => { const s = new Set(prev); s.delete(item.id); return s })
       fetchQueue()
     } catch (err) {
-      addToast(`#${item.id} ${decision} failed: ${err.message}`, 'error')
+      // Distinguish a client-side abort/timeout from an actual server error.
+      // A squash-merge + verification can take 20-40s; if the 60s client timeout
+      // fires before the backend responds, the merge may still succeed — never
+      // surface "Fetch is aborted" as a merge failure.
+      const isClientAbort = err.name === 'AbortError' || err.name === 'TimeoutError'
+      if (isClientAbort) {
+        // Keep the row in pending state; the 15s polling loop will reconcile.
+        addToast(
+          `#${item.id} ${decision} — still processing (checking status…)`,
+          'info',
+        )
+      } else {
+        // Real server error (HTTP 4xx/5xx) — safe to report as failure.
+        setPendingIds(prev => { const s = new Set(prev); s.delete(item.id); return s })
+        addToast(`#${item.id} ${decision} failed: ${err.message}`, 'error')
+      }
     } finally {
       setLoadingId(null)
     }
@@ -636,6 +677,7 @@ function QueuePanel() {
                   item={item}
                   onDecision={handleDecision}
                   loadingId={loadingId}
+                  pendingIds={pendingIds}
                 />
               ))}
             </div>
