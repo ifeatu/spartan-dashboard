@@ -1,0 +1,2 @@
+# Auto-union CHANGELOG to prevent parallel-CCP merge conflicts
+CHANGELOG.md merge=union
