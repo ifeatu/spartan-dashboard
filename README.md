@@ -45,18 +45,16 @@ Health endpoints won't resolve locally without the NAS — use mock data or VPN.
 ## Deploy to SPARTAN
 
 ```bash
-# Stop & remove old container
-ssh pierre@192.168.1.19 "docker stop spartan-dashboard 2>/dev/null; docker rm spartan-dashboard 2>/dev/null; true"
-
-# Copy files
-scp -r ./* pierre@192.168.1.19:/volume1/docker/spartan-dashboard/
-
-# Build & start
-ssh pierre@192.168.1.19 "cd /volume1/docker/spartan-dashboard && docker compose up -d --build"
-
-# Verify
-ssh pierre@192.168.1.19 "curl -s -u pierre:spartan2026 http://localhost:8780/api/health/chief"
+./deploy.sh            # full deploy (rsync → docker build → health check)
+./deploy.sh --dry-run  # preview actions without executing
+./deploy.sh --quick    # skip git fetch / ahead-of-origin check
+./deploy.sh --force    # allow dirty working tree (use sparingly)
 ```
+
+The script rsyncs the repo to `synology:/volume1/docker/spartan-dashboard/`,
+runs `docker compose up -d --build` (required — Vite output is baked into the
+image), and polls `http://192.168.1.19:8780/` for HTTP 200 before tagging the
+deploy in git.
 
 ## File structure
 

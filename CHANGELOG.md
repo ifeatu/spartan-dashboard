@@ -1,3 +1,15 @@
+## 2026-06-19 — Add deploy.sh for repeatable NAS deployments
+
+### Added
+- `deploy.sh`: self-contained deploy script following `spartan-deploy.sh` patterns
+  (git preflight → rsync → `docker compose up -d --build` → health check → git tag).
+  Replaces the ad-hoc manual `scp` + ssh commands in the README. Required because
+  spartan-dashboard is a baked-image agent (Vite output is compiled into the Docker
+  image) and was not registered in the spartan-ops registry; this gives the operator
+  a single-command deploy path that enforces clean-git, push-verified state and posts
+  a health check before tagging.
+- `README.md`: updated Deploy section to document `./deploy.sh` usage.
+
 ## 2026-06-13 — Fix false "merge failed" toast caused by client-side AbortController timeout
 
 ### Fixed
