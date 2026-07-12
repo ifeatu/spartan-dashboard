@@ -23,7 +23,6 @@ const GROUPS = [
       { id: 'cycleforge', name: 'CYCLEFORGE', desc: 'Lifecycle automation agent',    port: 8743 },
       { id: 'coach',      name: 'COACH',      desc: 'Performance coaching agent',    port: 8744 },
       { id: 'ifeoma',     name: 'IFEOMA',     desc: 'Research & insights agent',     port: 8758 },
-      { id: 'comply',     name: 'COMPLY',     desc: 'Compliance & audit agent',      port: 8760 },
       { id: 'erlai',      name: 'ERLAI',      desc: 'ERLAI agent interface',         port: 8771 },
     ],
   },
@@ -38,13 +37,6 @@ const GROUPS = [
       { id: 'erlai-transform', name: 'TRANSFORM', desc: 'Data transform pipeline',   port: 8804 },
       { id: 'erlai-web',       name: 'WEB',       desc: 'Frontend application',      port: 3100 },
       { id: 'erlai-grafana',   name: 'GRAFANA',   desc: 'Metrics & dashboards',      port: 3002 },
-    ],
-  },
-  {
-    id: 'infra',
-    label: 'Infrastructure',
-    agents: [
-      { id: 'chromadb', name: 'CHROMADB', desc: 'Vector database',                  port: 8200 },
     ],
   },
 ]
