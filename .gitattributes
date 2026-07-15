@@ -1,2 +1,5 @@
 # Auto-union CHANGELOG to prevent parallel-CCP merge conflicts
 CHANGELOG.md merge=union
+
+# Lock files are auto-generated; mark as such so diff tools don't flag them as unrelated
+frontend/package-lock.json linguist-generated=true

@@ -15,6 +15,12 @@
 - `frontend/src/test-setup.js`: `@testing-library/jest-dom` import for vitest.
 - `frontend/vite.config.js`: vitest configuration (jsdom environment).
 - `frontend/package.json`: added `vitest`, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `jsdom` as dev dependencies; added `test` and `test:watch` scripts.
+## 2026-07-15 — Mark package-lock.json as linguist-generated in .gitattributes
+
+### Changed
+- `.gitattributes`: added `frontend/package-lock.json linguist-generated=true` so automated
+  review tools recognise the lock file as auto-generated and stop flagging it as an
+  unrelated change whenever `package.json` dependencies are updated.
 
 ## 2026-06-19 — Add deploy.sh for repeatable NAS deployments
 
