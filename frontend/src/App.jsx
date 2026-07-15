@@ -258,9 +258,23 @@ function AgentCard({ agent, result, selected, onClick }) {
 /* ── Build Queue Panel ───────────────────────────────── */
 const QUEUE_REFRESH_MS = 15_000
 
-async function postDecision(itemId, decision) {
-  // Squash-merge + Bob's post-merge verification can legitimately take 20-40s.
-  // Use 60s so we don't abort a merge that is still running server-side.
+/** Strip HTML tags and entities from a string (safe, no DOM needed). */
+export function stripHtml(str) {
+  return String(str ?? '').replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim()
+}
+
+/**
+ * POST a gate decision to Bob.
+ *
+ * Returns one of:
+ *   { indeterminate: true }           — 5xx or non-JSON body; let the poll resolve
+ *   { ok: true, data, accepted }      — 2xx; accepted=true when server returns 202+status:accepted
+ *
+ * Throws Error with a clean, HTML-stripped message for 4xx with a JSON body.
+ *
+ * The server now answers immediately (async merge job), so 15s is ample.
+ */
+export async function postDecision(itemId, decision) {
   const res = await fetch(`/api/bob/queue/${itemId}/decision`, {
     method: 'POST',
     headers: {
@@ -268,13 +282,29 @@ async function postDecision(itemId, decision) {
       'X-Bob-Secret': BOB_SECRET,
     },
     body: JSON.stringify({ decision }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(15_000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+
+  let json = null
+  try { json = await res.json() } catch { /* non-JSON body */ }
+
+  // 5xx or unparseable body → cannot determine outcome; poll will reconcile
+  if (res.status >= 500 || json === null) {
+    return { indeterminate: true }
   }
-  return res.json().catch(() => null)
+
+  // 4xx with JSON → clean error, never raw body text
+  if (!res.ok) {
+    const msg = stripHtml(json.error ?? json.message ?? `HTTP ${res.status}`)
+    throw new Error(msg.slice(0, 100))
+  }
+
+  return {
+    ok: true,
+    data: json,
+    // 202 {"status":"accepted"}: server enqueued an async merge job
+    accepted: res.status === 202 && json?.status === 'accepted',
+  }
 }
 
 async function postBreakerClear() {
@@ -286,11 +316,16 @@ async function postBreakerClear() {
     },
     signal: AbortSignal.timeout(20000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+  let json = null
+  try { json = await res.json() } catch { /* non-JSON */ }
+  if (res.status >= 500 || json === null) {
+    throw new Error('status unknown — check breaker manually')
   }
-  return res.json().catch(() => null)
+  if (!res.ok) {
+    const msg = stripHtml(json.error ?? json.message ?? `HTTP ${res.status}`)
+    throw new Error(msg.slice(0, 100))
+  }
+  return json
 }
 
 async function postSeedDebt() {
@@ -303,11 +338,16 @@ async function postSeedDebt() {
     body: JSON.stringify({}),
     signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 120) : ''}`)
+  let json = null
+  try { json = await res.json() } catch { /* non-JSON */ }
+  if (res.status >= 500 || json === null) {
+    throw new Error('status unknown — check queue manually')
   }
-  return res.json().catch(() => null)
+  if (!res.ok) {
+    const msg = stripHtml(json.error ?? json.message ?? `HTTP ${res.status}`)
+    throw new Error(msg.slice(0, 100))
+  }
+  return json
 }
 
 async function fetchRecentFailures() {
@@ -443,7 +483,7 @@ function QueueItemRow({ item, onDecision, loadingId, pendingIds }) {
   )
 }
 
-function QueuePanel() {
+export function QueuePanel() {
   const [summary, setSummary] = useState(null)
   const [items, setItems] = useState(null) // null = unknown, [] = empty, [...]
   const [listSupported, setListSupported] = useState(true)
@@ -453,6 +493,10 @@ function QueuePanel() {
   // Items whose decision was fired but not yet confirmed (fire-then-reconcile pattern).
   // Prevents double-clicks and avoids clearing the spinner when a merge response is slow.
   const [pendingIds, setPendingIds] = useState(new Set())
+  // Tracks decisions that need a confirmation toast when the poll resolves them.
+  // Map<itemId, decision> — populated for indeterminate (5xx/non-JSON), 202-accepted,
+  // and client-abort outcomes where we can't confirm the result immediately.
+  const pendingToastRef = useRef(new Map())
   const [confirmPending, setConfirmPending] = useState(null) // {item, decision}
   const [triage, setTriage] = useState(null) // null | {loading, fails}
   const [breakerBusy, setBreakerBusy] = useState(false)
@@ -513,42 +557,68 @@ function QueuePanel() {
 
   // Reconcile pending decisions: once an item is no longer in the gated list,
   // the merge (or discard/defer) has resolved on the server — clear its pending flag.
+  // For outcomes that were indeterminate (5xx/non-JSON) or 202-accepted, also
+  // fire a success toast so the operator knows the operation completed.
   useEffect(() => {
     if (!items) return
+    const gatedIds = new Set(items.filter(i => i.status === 'gated').map(i => i.id))
+
+    // Find IDs that need a confirmation toast (left gated AND were awaiting poll)
+    const toastCandidates = [...pendingToastRef.current.entries()]
+      .filter(([id]) => !gatedIds.has(id))
+    toastCandidates.forEach(([id, decision]) => {
+      pendingToastRef.current.delete(id)
+      addToast(`#${id} ${decision} — confirmed`, 'success')
+    })
+
     setPendingIds(prev => {
       if (prev.size === 0) return prev
-      const gatedIds = new Set(items.filter(i => i.status === 'gated').map(i => i.id))
       const toResolve = [...prev].filter(id => !gatedIds.has(id))
       if (toResolve.length === 0) return prev
       const next = new Set(prev)
       toResolve.forEach(id => next.delete(id))
       return next
     })
-  }, [items]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, addToast])
 
   const executeDecision = useCallback(async (item, decision) => {
     setLoadingId(item.id)
     // Mark as pending immediately so the row locks while the server processes.
     setPendingIds(prev => { const s = new Set(prev); s.add(item.id); return s })
     try {
-      await postDecision(item.id, decision)
-      addToast(`#${item.id} → ${decision} accepted`, 'success')
-      setPendingIds(prev => { const s = new Set(prev); s.delete(item.id); return s })
-      fetchQueue()
+      const result = await postDecision(item.id, decision)
+
+      if (result.indeterminate) {
+        // 5xx or non-JSON body: outcome unknown — let the 15s poll reconcile.
+        // Never show raw body; never clear pending until poll confirms.
+        pendingToastRef.current.set(item.id, decision)
+        addToast(`#${item.id} ${decision} — status unknown, confirming…`, 'info')
+      } else if (result.accepted) {
+        // 202 {"status":"accepted"}: server enqueued async merge job.
+        // Keep pending until poll sees item leave gated, then toast "confirmed".
+        pendingToastRef.current.set(item.id, decision)
+        addToast(`#${item.id} ${decision} accepted — merging…`, 'success')
+      } else {
+        // Synchronous 2xx (defer, discard, or immediate 200 merge).
+        // Clear pending explicitly — defer keeps the item gated so the
+        // reconciler alone would never clear it.
+        addToast(`#${item.id} → ${decision} accepted`, 'success')
+        setPendingIds(prev => { const s = new Set(prev); s.delete(item.id); return s })
+        fetchQueue()
+      }
     } catch (err) {
-      // Distinguish a client-side abort/timeout from an actual server error.
-      // A squash-merge + verification can take 20-40s; if the 60s client timeout
-      // fires before the backend responds, the merge may still succeed — never
-      // surface "Fetch is aborted" as a merge failure.
       const isClientAbort = err.name === 'AbortError' || err.name === 'TimeoutError'
       if (isClientAbort) {
-        // Keep the row in pending state; the 15s polling loop will reconcile.
+        // Client timeout fires before server answered; the 15s timeout means
+        // the server may be slow but not necessarily failed — keep pending.
+        pendingToastRef.current.set(item.id, decision)
         addToast(
           `#${item.id} ${decision} — still processing (checking status…)`,
           'info',
         )
       } else {
-        // Real server error (HTTP 4xx/5xx) — safe to report as failure.
+        // 4xx with JSON body: server rejected the decision (e.g. wrong state).
+        // err.message is already clean (HTML-stripped, ≤100 chars).
         setPendingIds(prev => { const s = new Set(prev); s.delete(item.id); return s })
         addToast(`#${item.id} ${decision} failed: ${err.message}`, 'error')
       }
