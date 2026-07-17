@@ -22,6 +22,7 @@ const GROUPS = [
       { id: 'susan',      name: 'SUSAN',      desc: 'Customer success agent',        port: 8756 },
       { id: 'cycleforge', name: 'CYCLEFORGE', desc: 'Lifecycle automation agent',    port: 8743 },
       { id: 'coach',      name: 'COACH',      desc: 'Performance coaching agent',    port: 8744 },
+      { id: 'iris',       name: 'IRIS',       desc: 'Frontend design agent',         port: 8761 },
       { id: 'ifeoma',     name: 'IFEOMA',     desc: 'Research & insights agent',     port: 8758 },
       { id: 'comply',     name: 'COMPLY',     desc: 'Compliance & audit agent',      port: 8760 },
       { id: 'erlai',      name: 'ERLAI',      desc: 'ERLAI agent interface',         port: 8771 },
