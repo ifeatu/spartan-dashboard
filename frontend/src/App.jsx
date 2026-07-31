@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { apiFetch, isAuthLost, subscribeAuthLost } from './authGate'
 import './App.css'
 
 const BOB_SECRET = import.meta.env.VITE_BOB_SECRET || ''
@@ -52,6 +53,14 @@ const GROUPS = [
 const ALL_AGENTS = GROUPS.flatMap(g => g.agents)
 
 /* ── Status helpers ──────────────────────────────────── */
+/* Subscribes to the auth breaker in authGate.js. Once tripped it never
+ * untrips — the only recovery is a full reload, which re-challenges once. */
+function useAuthLost() {
+  const [lost, setLost] = useState(isAuthLost())
+  useEffect(() => subscribeAuthLost(() => setLost(true)), [])
+  return lost
+}
+
 function classifyStatus(result) {
   if (!result) return 'unknown'
   if (result.error) return 'down'
@@ -275,7 +284,7 @@ export function stripHtml(str) {
  * The server now answers immediately (async merge job), so 15s is ample.
  */
 export async function postDecision(itemId, decision) {
-  const res = await fetch(`/api/bob/queue/${itemId}/decision`, {
+  const res = await apiFetch(`/api/bob/queue/${itemId}/decision`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -308,7 +317,7 @@ export async function postDecision(itemId, decision) {
 }
 
 async function postBreakerClear() {
-  const res = await fetch('/api/bob/queue/breaker/clear', {
+  const res = await apiFetch('/api/bob/queue/breaker/clear', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -329,7 +338,7 @@ async function postBreakerClear() {
 }
 
 async function postSeedDebt() {
-  const res = await fetch('/api/bob/queue/seed-debt', {
+  const res = await apiFetch('/api/bob/queue/seed-debt', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -352,7 +361,7 @@ async function postSeedDebt() {
 
 async function fetchRecentFailures() {
   try {
-    const res = await fetch('/api/bob/queue/list?status=failed&limit=6', {
+    const res = await apiFetch('/api/bob/queue/list?status=failed&limit=6', {
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) return []
@@ -484,6 +493,7 @@ function QueueItemRow({ item, onDecision, loadingId, pendingIds }) {
 }
 
 export function QueuePanel() {
+  const authLost = useAuthLost()
   const [summary, setSummary] = useState(null)
   const [items, setItems] = useState(null) // null = unknown, [] = empty, [...]
   const [listSupported, setListSupported] = useState(true)
@@ -517,7 +527,7 @@ export function QueuePanel() {
   const fetchQueue = useCallback(async () => {
     setPolling(true)
     try {
-      const sumRes = await fetch('/api/bob/queue/summary', {
+      const sumRes = await apiFetch('/api/bob/queue/summary', {
         signal: AbortSignal.timeout(4000),
       })
       if (sumRes.ok) {
@@ -531,7 +541,7 @@ export function QueuePanel() {
     // Probe gracefully — once it's wired up the panel lights up without redeploy.
     if (listSupported) {
       try {
-        const listRes = await fetch(
+        const listRes = await apiFetch(
           '/api/bob/queue/list?status=queued,dispatched,running,gated&limit=10',
           { signal: AbortSignal.timeout(4000) }
         )
@@ -550,10 +560,11 @@ export function QueuePanel() {
   }, [listSupported])
 
   useEffect(() => {
+    if (authLost) return
     fetchQueue()
     const id = setInterval(fetchQueue, QUEUE_REFRESH_MS)
     return () => clearInterval(id)
-  }, [fetchQueue])
+  }, [fetchQueue, authLost])
 
   // Reconcile pending decisions: once an item is no longer in the gated list,
   // the merge (or discard/defer) has resolved on the server — clear its pending flag.
@@ -829,6 +840,7 @@ function DebtItemRow({ item }) {
 }
 
 function DebtPanel() {
+  const authLost = useAuthLost()
   const [items, setItems] = useState(null)
   const [supported, setSupported] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(null)
@@ -837,7 +849,7 @@ function DebtPanel() {
   const fetchDebt = useCallback(async () => {
     setPolling(true)
     try {
-      const res = await fetch('/api/bob/debt/list?status=open', {
+      const res = await apiFetch('/api/bob/debt/list?status=open', {
         signal: AbortSignal.timeout(4000),
       })
       if (res.status === 404) {
@@ -854,10 +866,11 @@ function DebtPanel() {
   }, [])
 
   useEffect(() => {
+    if (authLost) return
     fetchDebt()
     const id = setInterval(fetchDebt, QUEUE_REFRESH_MS)
     return () => clearInterval(id)
-  }, [fetchDebt])
+  }, [fetchDebt, authLost])
 
   if (!supported) {
     return (
@@ -922,6 +935,7 @@ function DebtPanel() {
 const REFRESH_INTERVAL = 30_000
 
 export default function App() {
+  const authLost = useAuthLost()
   const [results, setResults] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -933,7 +947,7 @@ export default function App() {
   const fetchAgent = useCallback(async (agent) => {
     const start = Date.now()
     try {
-      const res = await fetch(`/api/health/${agent.id}`, {
+      const res = await apiFetch(`/api/health/${agent.id}`, {
         signal: AbortSignal.timeout(4000),
       })
       const latencyMs = Date.now() - start
@@ -975,18 +989,20 @@ export default function App() {
 
   // Initial fetch + interval
   useEffect(() => {
+    if (authLost) return
     fetchAll()
     timerRef.current = setInterval(fetchAll, REFRESH_INTERVAL)
     return () => clearInterval(timerRef.current)
-  }, [fetchAll])
+  }, [fetchAll, authLost])
 
   // Countdown ticker
   useEffect(() => {
+    if (authLost) return
     countdownRef.current = setInterval(() => {
       setCountdown(c => Math.max(0, c - 1))
     }, 1000)
     return () => clearInterval(countdownRef.current)
-  }, [])
+  }, [authLost])
 
   // Summary stats
   const counts = { healthy: 0, degraded: 0, down: 0, unknown: 0 }
@@ -1000,6 +1016,19 @@ export default function App() {
 
   return (
     <div className="app">
+      {authLost && (
+        <div className="auth-lost-banner" role="alert">
+          <strong>Session expired.</strong> Polling stopped so the browser will
+          not keep prompting for credentials. Reload to sign in again.
+          <button
+            className="btn-refresh"
+            onClick={() => window.location.reload()}
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <header className="header">
         <div className="header-left">
@@ -1011,7 +1040,11 @@ export default function App() {
             <span className={`pulse-dot${countdown === 0 ? ' stale' : ''}`} />
             {isRefreshing ? 'Polling…' : `Next refresh in ${countdown}s`}
           </div>
-          <button className="btn-refresh" onClick={fetchAll} disabled={isRefreshing}>
+          <button
+            className="btn-refresh"
+            onClick={fetchAll}
+            disabled={isRefreshing || authLost}
+          >
             {isRefreshing ? '⟳ Polling…' : '⟳ Refresh'}
           </button>
         </div>
