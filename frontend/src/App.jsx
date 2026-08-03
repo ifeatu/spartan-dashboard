@@ -503,6 +503,8 @@ export function QueuePanel() {
   const [seedBusy, setSeedBusy] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
+  const queueIntervalRef = useRef(null)
+  const queueAuthRef = useRef(0) // consecutive 401 count — circuit breaker
 
   const addToast = useCallback((message, type = 'info') => {
     const id = ++toastIdRef.current
@@ -520,6 +522,16 @@ export function QueuePanel() {
       const sumRes = await fetch('/api/bob/queue/summary', {
         signal: AbortSignal.timeout(4000),
       })
+      if (sumRes.status === 401) {
+        // Circuit breaker: stop polling after 2 consecutive 401s (credential cache gone)
+        queueAuthRef.current += 1
+        if (queueAuthRef.current >= 2) {
+          clearInterval(queueIntervalRef.current)
+        }
+        setPolling(false)
+        return
+      }
+      queueAuthRef.current = 0
       if (sumRes.ok) {
         const sumJson = await sumRes.json()
         setSummary(sumJson)
@@ -551,8 +563,8 @@ export function QueuePanel() {
 
   useEffect(() => {
     fetchQueue()
-    const id = setInterval(fetchQueue, QUEUE_REFRESH_MS)
-    return () => clearInterval(id)
+    queueIntervalRef.current = setInterval(fetchQueue, QUEUE_REFRESH_MS)
+    return () => clearInterval(queueIntervalRef.current)
   }, [fetchQueue])
 
   // Reconcile pending decisions: once an item is no longer in the gated list,
@@ -833,6 +845,8 @@ function DebtPanel() {
   const [supported, setSupported] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(null)
   const [polling, setPolling] = useState(false)
+  const debtIntervalRef = useRef(null)
+  const debtAuthRef = useRef(0) // consecutive 401 count — circuit breaker
 
   const fetchDebt = useCallback(async () => {
     setPolling(true)
@@ -840,6 +854,15 @@ function DebtPanel() {
       const res = await fetch('/api/bob/debt/list?status=open', {
         signal: AbortSignal.timeout(4000),
       })
+      if (res.status === 401) {
+        debtAuthRef.current += 1
+        if (debtAuthRef.current >= 2) {
+          clearInterval(debtIntervalRef.current)
+        }
+        setPolling(false)
+        return
+      }
+      debtAuthRef.current = 0
       if (res.status === 404) {
         setSupported(false)
       } else if (res.ok) {
@@ -855,8 +878,8 @@ function DebtPanel() {
 
   useEffect(() => {
     fetchDebt()
-    const id = setInterval(fetchDebt, QUEUE_REFRESH_MS)
-    return () => clearInterval(id)
+    debtIntervalRef.current = setInterval(fetchDebt, QUEUE_REFRESH_MS)
+    return () => clearInterval(debtIntervalRef.current)
   }, [fetchDebt])
 
   if (!supported) {
@@ -927,8 +950,13 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL / 1000)
+  const [authBlocked, setAuthBlocked] = useState(false)
   const timerRef = useRef(null)
   const countdownRef = useRef(null)
+  // Circuit-breaker: counts consecutive sweeps where every agent returned 401.
+  // After 2 such sweeps the browser credential cache is confirmed empty — stop
+  // polling to avoid a cascade of login dialogs and prompt the user to reload.
+  const authBreakerRef = useRef(0)
 
   const fetchAgent = useCallback(async (agent) => {
     const start = Date.now()
@@ -967,6 +995,22 @@ export default function App() {
         return [agent.id, result]
       })
     )
+
+    // Circuit breaker: if every agent returned 401 twice running, the browser's
+    // cached Basic credentials are gone. Stop hammering and tell the user.
+    const all401 = entries.every(([, r]) => r.httpStatus === 401)
+    if (all401) {
+      authBreakerRef.current += 1
+      if (authBreakerRef.current >= 2) {
+        clearInterval(timerRef.current)
+        setAuthBlocked(true)
+        setIsRefreshing(false)
+        return
+      }
+    } else {
+      authBreakerRef.current = 0
+    }
+
     setResults(Object.fromEntries(entries))
     setLastUpdated(new Date())
     setIsRefreshing(false)
@@ -1008,14 +1052,24 @@ export default function App() {
         </div>
         <div className="header-right">
           <div className="refresh-status">
-            <span className={`pulse-dot${countdown === 0 ? ' stale' : ''}`} />
-            {isRefreshing ? 'Polling…' : `Next refresh in ${countdown}s`}
+            <span className={`pulse-dot${countdown === 0 || authBlocked ? ' stale' : ''}`} />
+            {authBlocked ? 'Polling stopped' : isRefreshing ? 'Polling…' : `Next refresh in ${countdown}s`}
           </div>
-          <button className="btn-refresh" onClick={fetchAll} disabled={isRefreshing}>
+          <button className="btn-refresh" onClick={fetchAll} disabled={isRefreshing || authBlocked}>
             {isRefreshing ? '⟳ Polling…' : '⟳ Refresh'}
           </button>
         </div>
       </header>
+
+      {/* Auth circuit-breaker banner: shown when all /api/health/* return 401 twice running */}
+      {authBlocked && (
+        <div className="auth-error-banner">
+          Session credentials cleared — polling stopped to prevent login-dialog storm.{' '}
+          <button className="auth-error-reload" onClick={() => window.location.reload()}>
+            Reload to re-authenticate
+          </button>
+        </div>
+      )}
 
       {/* Summary Banner */}
       <div className="summary-banner">
