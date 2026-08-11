@@ -1,6 +1,6 @@
 # SPARTAN Dashboard v2
 
-Fleet monitoring dashboard for SPARTAN infrastructure — 12 MCP agents, ERLAI CCI platform (7 services), and infrastructure.
+Fleet monitoring dashboard for SPARTAN infrastructure — 10 MCP agents, ERLAI CCI platform (7 services), and infrastructure.
 
 **Live:** https://dashboard.fatu.ai  
 **Port:** 8780 (nginx) → Cloudflare tunnel  
@@ -9,7 +9,7 @@ Fleet monitoring dashboard for SPARTAN infrastructure — 12 MCP agents, ERLAI C
 ## Stack
 
 - **Frontend:** React 18 + Vite → compiled static SPA
-- **Server:** nginx:alpine — serves static files + proxies `/api/health/*`
+- **Server:** nginx:alpine — serves static files + proxies `/api/health/*` (fleet) and `/api/bob/*` (Build Queue / Tech Debt panels)
 - **Auth:** nginx `auth_basic` + htpasswd
 - **Deploy:** Docker Compose on SPARTAN NAS (192.168.1.19)
 
@@ -28,7 +28,7 @@ Fleet monitoring dashboard for SPARTAN infrastructure — 12 MCP agents, ERLAI C
 | Group | Services |
 |---|---|
 | Core Agents | CHIEF (8752), SCRIBE (8742), FORGE (8768) |
-| Domain Agents | BOB (8755), SUSAN (8756), CYCLEFORGE (8743), COACH (8744), IFEOMA (8758), ERLAI (8771) |
+| Domain Agents | BOB (8755), SUSAN (8756), CYCLEFORGE (8743), COACH (8744), IRIS (8761), IFEOMA (8758), ERLAI (8771) |
 | ERLAI CCI Platform | GW (8800), INGEST (8801), SCORE (8802), ORCH (8803), TRANSFORM (8804), WEB (3100), GRAFANA (3002) |
 | Infrastructure | CHROMADB (8200) |
 
