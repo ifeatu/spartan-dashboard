@@ -11,7 +11,6 @@ const GROUPS = [
     agents: [
       { id: 'chief',  name: 'CHIEF',      desc: 'Orchestrator / Command agent',    port: 8752 },
       { id: 'scribe', name: 'SCRIBE',     desc: 'Document & memory agent',          port: 8742 },
-      { id: 'forge',  name: 'FORGE',      desc: 'Build & deployment agent',         port: 8768 },
     ],
   },
   {
@@ -24,20 +23,6 @@ const GROUPS = [
       { id: 'coach',      name: 'COACH',      desc: 'Performance coaching agent',    port: 8744 },
       { id: 'iris',       name: 'IRIS',       desc: 'Frontend design agent',         port: 8761 },
       { id: 'ifeoma',     name: 'IFEOMA',     desc: 'Research & insights agent',     port: 8758 },
-      { id: 'erlai',      name: 'ERLAI',      desc: 'ERLAI agent interface',         port: 8771 },
-    ],
-  },
-  {
-    id: 'erlai',
-    label: 'ERLAI CCI Platform',
-    agents: [
-      { id: 'erlai-gw',        name: 'GW',        desc: 'API gateway',               port: 8800 },
-      { id: 'erlai-ingest',    name: 'INGEST',    desc: 'Data ingestion service',    port: 8801 },
-      { id: 'erlai-score',     name: 'SCORE',     desc: 'Scoring engine',            port: 8802 },
-      { id: 'erlai-orch',      name: 'ORCH',      desc: 'Orchestration service',     port: 8803 },
-      { id: 'erlai-transform', name: 'TRANSFORM', desc: 'Data transform pipeline',   port: 8804 },
-      { id: 'erlai-web',       name: 'WEB',       desc: 'Frontend application',      port: 3100 },
-      { id: 'erlai-grafana',   name: 'GRAFANA',   desc: 'Metrics & dashboards',      port: 3002 },
     ],
   },
   {
