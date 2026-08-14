@@ -1,0 +1,4 @@
+# Copy to bob-auth.conf on the NAS (mode 600) and fill in bob's
+# SPARTAN_SERVICE_TOKEN. Never commit the real file.
+#   ssh synology 'sudo docker exec bob-mcp printenv SPARTAN_SERVICE_TOKEN'
+proxy_set_header X-SPARTAN-Service-Token REPLACE_WITH_BOB_SPARTAN_SERVICE_TOKEN;

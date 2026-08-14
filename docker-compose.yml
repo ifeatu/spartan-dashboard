@@ -12,6 +12,13 @@ services:
       - "8780:80"
     volumes:
       - ./htpasswd:/etc/nginx/.htpasswd:ro
+      # Injects `proxy_set_header X-SPARTAN-Service-Token <secret>;` into every
+      # /api/bob/* location. bob runs MCP_AUTH_REQUIRED=true, so without this
+      # header bob answers 401 and the queue/debt panels render empty.
+      # Secret-bearing, so it is gitignored and lives only on the NAS at
+      # /volume1/docker/spartan-dashboard/bob-auth.conf (mode 600).
+      # See bob-auth.conf.example for the shape.
+      - ./bob-auth.conf:/etc/nginx/bob-auth.conf:ro
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
