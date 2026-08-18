@@ -926,6 +926,131 @@ function DebtPanel() {
   )
 }
 
+/* ── Direct CCP Panel ────────────────────────────────── */
+// debt #705: bob_run_ccp(queue_id=0) direct/exploratory dispatches never get
+// a build_queue row, so /api/bob/queue/list can never surface them — even
+// when bob_ccp_reap confirms the job is alive (pid_alive=true). An operator
+// staring at a dashboard with no "Direct CCPs" panel reads that as
+// job-not-running. This panel sources the same liveness probe bob_ccp_reap
+// uses (pid_alive + terminal + age) via /ccp/direct and renders only
+// non-terminal direct jobs. /ccp/direct doesn't exist on bob-mcp yet
+// (companion backend change) — probe gracefully like the debt panel above
+// so this lights up without a dashboard redeploy once it lands.
+function directCcpStatus(item) {
+  if (item.pid_alive) return 'alive'
+  if (item.zombie) return 'zombie'
+  return 'unknown'
+}
+
+function DirectCcpRow({ item }) {
+  const status = directCcpStatus(item)
+  const age = item.age_minutes != null ? `${item.age_minutes}m` : '—'
+  return (
+    <div className={`queue-item queue-item-direct-${status}`}>
+      <div className="queue-item-id">#{item.job_id}</div>
+      <div className="queue-item-main">
+        <div className="queue-item-title">
+          {item.worktree || item.repo || `job ${item.job_id}`}
+        </div>
+        <div className="queue-item-meta">
+          {item.repo && (
+            <>
+              <span className="queue-item-repo">{item.repo}</span>
+              <span className="queue-item-sep">·</span>
+            </>
+          )}
+          <span>age {age}</span>
+        </div>
+      </div>
+      <div className={`queue-item-status badge-direct-${status}`}>{status}</div>
+    </div>
+  )
+}
+
+function DirectCcpPanel() {
+  const [items, setItems] = useState(null)
+  const [supported, setSupported] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const [polling, setPolling] = useState(false)
+  const directIntervalRef = useRef(null)
+  const directAuthRef = useRef(0) // consecutive 401 count — circuit breaker
+
+  const fetchDirect = useCallback(async () => {
+    setPolling(true)
+    try {
+      const res = await fetch('/api/bob/ccp/direct?terminal=false&limit=10', {
+        signal: AbortSignal.timeout(4000),
+      })
+      if (res.status === 401) {
+        directAuthRef.current += 1
+        if (directAuthRef.current >= 2) {
+          clearInterval(directIntervalRef.current)
+        }
+        setPolling(false)
+        return
+      }
+      directAuthRef.current = 0
+      if (res.status === 404) {
+        setSupported(false)
+      } else if (res.ok) {
+        const json = await res.json()
+        setItems(json.items || [])
+        setUpdatedAt(new Date())
+      }
+    } catch (e) {
+      // network blip — keep prior items
+    }
+    setPolling(false)
+  }, [])
+
+  useEffect(() => {
+    fetchDirect()
+    directIntervalRef.current = setInterval(fetchDirect, QUEUE_REFRESH_MS)
+    return () => clearInterval(directIntervalRef.current)
+  }, [fetchDirect])
+
+  if (!supported) {
+    return (
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Direct CCPs</span>
+          <span className="queue-panel-status">/ccp/direct not deployed yet</span>
+        </div>
+      </section>
+    )
+  }
+  if (items === null) {
+    return (
+      <section className="queue-panel">
+        <div className="queue-panel-header">
+          <span className="queue-panel-title">Direct CCPs</span>
+          <span className="queue-panel-status">Loading…</span>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="queue-panel">
+      <div className="queue-panel-header">
+        <span className="queue-panel-title">Direct CCPs</span>
+        <span className="queue-panel-status">
+          {polling ? 'polling…' : updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <div className="queue-list-empty">
+          No live direct dispatches (bob_run_ccp with queue_id=0).
+        </div>
+      ) : (
+        <div className="queue-list">
+          {items.map(item => <DirectCcpRow key={item.job_id} item={item} />)}
+        </div>
+      )}
+    </section>
+  )
+}
+
 /* ── Main App ────────────────────────────────────────── */
 const REFRESH_INTERVAL = 30_000
 
@@ -1101,6 +1226,9 @@ export default function App() {
 
       {/* Tech Debt */}
       <DebtPanel />
+
+      {/* Direct CCPs (bob_run_ccp queue_id=0 dispatches, not in build_queue) */}
+      <DirectCcpPanel />
 
       {/* Main grid */}
       <main className="main-content">
