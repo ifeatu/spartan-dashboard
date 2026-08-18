@@ -361,6 +361,14 @@
 .badge-running    { color: var(--accent);   background: rgba(0,255,136,0.16); border: 1px solid rgba(0,255,136,0.45); }
 .badge-gated      { color: var(--degraded); background: rgba(255,170,0,0.10); border: 1px solid rgba(255,170,0,0.25); }
 
+/* Direct CCP liveness badges + markers (debt #705) */
+.badge-direct-alive   { color: var(--accent);   background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.25); }
+.badge-direct-zombie  { color: var(--down);     background: rgba(255,68,68,0.14); border: 1px solid rgba(255,68,68,0.40); }
+.badge-direct-unknown { color: var(--text-dim); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); }
+.queue-item-direct-alive::before   { background: var(--accent); animation: pulse 1.5s ease-in-out infinite; }
+.queue-item-direct-zombie::before  { background: var(--down); }
+.queue-item-direct-unknown::before { background: var(--unknown); }
+
 /* Tech debt severity badges + markers */
 .badge-sev-critical { color: var(--down);     background: rgba(255,68,68,0.14); border: 1px solid rgba(255,68,68,0.40); }
 .badge-sev-high     { color: var(--degraded); background: rgba(255,170,0,0.12); border: 1px solid rgba(255,170,0,0.30); }
