@@ -19,6 +19,9 @@ services:
       # /volume1/docker/spartan-dashboard/bob-auth.conf (mode 600).
       # See bob-auth.conf.example for the shape.
       - ./bob-auth.conf:/etc/nginx/bob-auth.conf:ro
+      # Chief (Voice): `proxy_set_header Authorization "Bearer <MUSE_DASHBOARD_VOICE_TOKEN>";`
+      # for /api/voice/signed-url. NAS only, mode 600; see muse-voice-auth.conf.example.
+      - ./muse-voice-auth.conf:/etc/nginx/muse-voice-auth.conf:ro
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

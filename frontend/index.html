@@ -13,8 +13,26 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <!-- Chief (Voice) — ElevenLabs Conversational AI widget -->
-    <elevenlabs-convai agent-id="agent_5101m08bsegcf4dsag6rbj183jad"></elevenlabs-convai>
+    <!-- Chief (Voice), ElevenLabs Conversational AI widget. The agent is private
+         (spartan-muse docs/design/voice-auth.md): the widget starts from a signed URL that muse
+         mints through Sentinel, valid 15 minutes to start, so it is fetched on load and
+         refreshed every 10 minutes. No agent id on this page. -->
+    <script>
+      (function () {
+        async function refreshSignedUrl() {
+          try {
+            const r = await fetch("/api/voice/signed-url", { credentials: "same-origin", cache: "no-store" });
+            if (!r.ok) { console.warn("Chief (Voice): signed URL refused", r.status); return; }
+            const { signed_url } = await r.json();
+            let el = document.querySelector("elevenlabs-convai");
+            if (!el) { el = document.createElement("elevenlabs-convai"); document.body.appendChild(el); }
+            el.setAttribute("signed-url", signed_url);
+          } catch (e) { console.warn("Chief (Voice): signed URL unavailable"); }
+        }
+        refreshSignedUrl();
+        setInterval(refreshSignedUrl, 10 * 60 * 1000);
+      })();
+    </script>
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
   </body>
 </html>
