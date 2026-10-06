@@ -1,3 +1,11 @@
+## 2026-10-06 — Stop disclosing the dashboard Basic-auth password in plaintext (debt #939)
+
+### Fixed
+- `README.md`: removed the live `pierre / spartan2026` Basic-auth credential from the Auth line and the file-structure note; both now point to rotation instructions instead of the real value.
+- `deploy.sh`: `DASHBOARD_PASS` no longer falls back to the hardcoded `spartan2026` default for the post-deploy health-check curl. The script now requires the operator to export `DASHBOARD_PASS` and exits with a clear error (exit 2) if it is unset, rather than silently authenticating with a committed secret.
+
+Repo is public on GitHub, so both occurrences were a live credential leak. Password rotation, repo visibility, and the `VITE_BOB_SECRET` bundle/Cloudflare Access follow-ups from debt #939 remain human/ops actions and are not covered by this change.
+
 ## 2026-07-15 — Fix gate-decision toast hygiene and defer pending-leak (spec D-F)
 
 ### Fixed

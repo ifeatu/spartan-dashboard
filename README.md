@@ -4,7 +4,7 @@ Fleet monitoring dashboard for SPARTAN infrastructure — 10 MCP agents, ERLAI C
 
 **Live:** https://dashboard.fatu.ai  
 **Port:** 8780 (nginx) → Cloudflare tunnel  
-**Auth:** HTTP Basic (pierre / spartan2026)
+**Auth:** HTTP Basic, credentials in `htpasswd` — never recorded here or anywhere else in plaintext. Rotate via `htpasswd -c htpasswd <user>` and redeploy; see tech debt #939 for the pattern bob-auth.conf/muse-voice-auth.conf already use for NAS-only secrets.
 
 ## Stack
 
@@ -71,6 +71,6 @@ spartan-dashboard/
 ├── nginx.conf          nginx proxy + auth config
 ├── Dockerfile          Multi-stage build
 ├── docker-compose.yml
-├── htpasswd            Basic auth credentials
+├── htpasswd            Basic auth credentials (hash only — rotate, don't disclose)
 └── README.md
 ```

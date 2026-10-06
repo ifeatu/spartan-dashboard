@@ -20,7 +20,8 @@
 #
 # Environment:
 #   DASHBOARD_PASS  Basic-auth password for the health-check curl
-#                   (default: spartan2026)
+#                   (required — no default; see tech debt #939, never commit
+#                   the real value here)
 
 set -u
 set -o pipefail
@@ -33,7 +34,7 @@ CONTAINER="spartan-dashboard"
 BRANCH="main"
 PORT="8780"
 HEALTH_PATH="/"
-DASHBOARD_PASS="${DASHBOARD_PASS:-spartan2026}"
+DASHBOARD_PASS="${DASHBOARD_PASS:-}"
 DOCKER_CMD="sudo /usr/local/bin/docker"
 # ─────────────────────────────────────────────────────────────
 
@@ -163,6 +164,10 @@ ssh_run "cd $NAS_DIR && $DOCKER_CMD compose up -d --build $CONTAINER" || {
 
 # ── Post-deploy health check ───────────────────────────────────
 if ! $DRY_RUN; then
+  if [ -z "$DASHBOARD_PASS" ]; then
+    echo "ERROR: DASHBOARD_PASS is not set (export it before running deploy.sh)" >&2
+    exit 2
+  fi
   echo ""
   echo "▶ Health check (waiting for container at http://$NAS_HOST:$PORT$HEALTH_PATH)"
   HEALTH_OK=false
